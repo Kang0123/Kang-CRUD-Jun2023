@@ -1,0 +1,78 @@
+const router = require("express").Router()
+const pool = require("../db");
+const bcrypt = require("bcrypt");
+const jwtGenerator = require("../utils/jwtGenerator");
+const validateData = require("../middleware/validateData");
+const authorization = require("../middleware/authorization");
+
+//Create new inventory manager account
+router.post("/register", validateData, async (request, response) => {
+    try {
+
+        const {firstName, lastName, username, password} = request.body;
+
+        const user = await pool.query('SELECT * FROM "User" WHERE "Username" = $1', [username]);
+
+        if (user.rows.length !== 0) {
+            return response.status(401).send("Username already in use.");
+        }
+
+        const saltRound = 10;
+        const salt = await bcrypt.genSalt(saltRound);
+
+        const bcryptPassword = await bcrypt.hash(password, salt);
+
+        const newManager = await pool.query('INSERT INTO "User" ("First Name", "Last Name", "Username", "Password") VALUES ($1, $2, $3, $4) RETURNING *', [firstName, lastName, username, bcryptPassword]);
+
+        const token = jwtGenerator(newManager.rows[0]["Id"]);
+
+        response.json({token});
+
+    } catch (error) {
+        console.error(error.message);
+        response.status(500).send("Server error");
+    }
+});
+
+
+//Login as an inventory manager
+router.post("/login", validateData, async (request, response) => {
+    try {
+        const {username, password} = request.body;
+
+        const manager = await pool.query('SELECT * FROM "User" WHERE "Username" = $1', [username]);
+
+        if (manager.rows.length === 0) {
+            return response.status(401).json("Incorrect username and password.")
+        }
+
+        const validPassword = await bcrypt.compare(password, manager.rows[0]["Password"]);
+
+        if (!validPassword) {
+            return response.status(401).json("Incorrect username and password.");
+        }
+
+        const token = jwtGenerator(manager.rows[0]["Id"]);
+
+        response.json({token});
+
+    } catch (error) {
+        console.error(error.message);
+        response.status(500).send("Server error.");
+    }
+});
+
+
+//Verify inventory manager is still valid
+router.get("/is-verified", authorization, async (request, response) => {
+    try {
+        response.json(true);
+        
+    } catch (error) {
+        console.error(error.message);
+        response.status(500).send("Server error.");
+    }
+})
+
+
+module.exports = router;
